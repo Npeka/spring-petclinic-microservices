@@ -1,42 +1,49 @@
 pipeline {
     agent any
-
     environment {
-        CHANGED_DIRS = ""
+        SERVICE_DIR = getChangedService()
     }
-
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/Npeka/spring-petclinic-microservices.git', credentialsId: 'github-credentials'
+                checkout scm
             }
         }
-
         stage('Detect Changes') {
             steps {
                 script {
-                    // Lấy danh sách thư mục bị thay đổi (chỉ lấy cấp 1 - service)
-                    CHANGED_DIRS = sh(script: "git diff --name-only HEAD~1 HEAD | cut -d'/' -f1 | sort -u", returnStdout: true).trim()
-                    echo "Changed directories: ${CHANGED_DIRS}"
+                    SERVICE_DIR = getChangedService()
+                    if (SERVICE_DIR == "") {
+                        echo "No relevant changes detected. Skipping build."
+                        currentBuild.result = 'SUCCESS'
+                        return
+                    }
+                    echo "Building service: ${SERVICE_DIR}"
                 }
             }
         }
-
-        stage('Build & Test') {
+        stage('Test') {
+            when {
+                expression { SERVICE_DIR != "" }
+            }
             steps {
                 script {
-                    def services = ['spring-petclinic-vets-service', 
-                                    'spring-petclinic-customers-service', 
-                                    'spring-petclinic-visits-service']
-
-                    for (service in services) {
-                        if (CHANGED_DIRS.contains(service)) {
-                            echo "Building and Testing ${service}"
-                            dir(service) {
-                                sh './mvnw test'
-                                sh './mvnw clean package -DskipTests'
-                            }
-                        }
+                    dir("${SERVICE_DIR}") {
+                        sh './mvnw test'
+                        junit 'target/surefire-reports/*.xml'
+                        jacoco(execPattern: 'target/jacoco.exec')
+                    }
+                }
+            }
+        }
+        stage('Build') {
+            when {
+                expression { SERVICE_DIR != "" }
+            }
+            steps {
+                script {
+                    dir("${SERVICE_DIR}") {
+                        sh './mvnw package'
                     }
                 }
             }
@@ -44,3 +51,25 @@ pipeline {
     }
 }
 
+
+def getChangedService() {
+    def changedFiles = sh(script: "git diff --name-only HEAD~1", returnStdout: true).trim().split("\n")
+    def services = [
+        "spring-petclinic-admin-server",
+        "spring-petclinic-api-gateway",
+        "spring-petclinic-config-server",
+        "spring-petclinic-customers-service",
+        "spring-petclinic-discovery-server",
+        "spring-petclinic-genai-service",
+        "spring-petclinic-vets-service",
+        "spring-petclinic-visits-service"
+    ]
+    for (file in changedFiles) {
+        for (service in services) {
+            if (file.startsWith(service + "/")) {
+                return service
+            }
+        }
+    }
+    return ""
+}
