@@ -8,7 +8,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/Npeka/spring-petclinic-microservices.git'
+                git branch: 'main', url: 'https://github.com/Npeka/spring-petclinic-microservices.git', credentialsId: 'github-credentials'
             }
         }
 
